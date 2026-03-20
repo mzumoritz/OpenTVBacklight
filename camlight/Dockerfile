@@ -14,4 +14,4 @@ COPY web/ /web/
 
 RUN mkdir -p /data
 
-CMD ["python3", "/main.py"]
+RUN printf '#!/bin/sh\npython3 /main.py\n' > /run.sh && chmod +x /run.sh
