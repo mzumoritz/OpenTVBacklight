@@ -1,13 +1,15 @@
-FROM ghcr.io/home-assistant/aarch64-base-python:3.11
+FROM python:3.11-alpine
 
 RUN apk add --no-cache \
     libgcc \
     libstdc++ \
     v4l-utils \
     ffmpeg \
-    dos2unix
+    dos2unix \
+    musl-dev \
+    gcc
 
-RUN pip3 install opencv-python-headless paho-mqtt flask requests
+RUN pip3 install --no-cache-dir opencv-python-headless paho-mqtt flask requests
 
 COPY run.sh /run.sh
 RUN dos2unix /run.sh && chmod +x /run.sh
