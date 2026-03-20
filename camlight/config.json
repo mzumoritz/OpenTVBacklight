@@ -1,6 +1,6 @@
 {
   "name": "CamLight",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "slug": "camlight",
   "description": "Camera-based TV backlight via average color",
   "arch": ["armv7", "aarch64"],

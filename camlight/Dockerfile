@@ -10,9 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip3 install --no-cache-dir opencv-python-headless paho-mqtt flask requests
 
 COPY run.sh /run.sh
-RUN chmod +x /run.sh
+RUN sed -i 's/\r//' /run.sh && chmod +x /run.sh
 
 COPY main.py /main.py
 COPY web/ /web/
-
 RUN mkdir -p /data
