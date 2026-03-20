@@ -1,5 +1,4 @@
-ARG BUILD_FROM
-FROM $BUILD_FROM
+FROM ghcr.io/home-assistant/aarch64-base-python:3.11
 
 RUN apk add --no-cache \
     libgcc \
@@ -7,7 +6,7 @@ RUN apk add --no-cache \
     v4l-utils \
     ffmpeg
 
-RUN pip install opencv-python-headless paho-mqtt flask requests
+RUN pip3 install opencv-python-headless paho-mqtt flask requests
 
 COPY main.py /main.py
 COPY web/ /web/
