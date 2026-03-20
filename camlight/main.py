@@ -9,24 +9,34 @@ import requests
 from flask import Flask, render_template, Response, request, jsonify
 
 # ---------------------------------------------------------------------------
-# Config from environment (set by run.sh via bashio)
+# Config — read from HA add-on options file
 # ---------------------------------------------------------------------------
-MQTT_HOST     = os.getenv("MQTT_HOST", "core-mosquitto")
-MQTT_PORT     = int(os.getenv("MQTT_PORT", 1883))
-MQTT_TOPIC    = os.getenv("MQTT_TOPIC", "tv/backlight/color")
-MQTT_USER     = os.getenv("MQTT_USER", "")
-MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
-INTERVAL      = int(os.getenv("CAPTURE_INTERVAL_MS", 200)) / 1000.0
+OPTIONS_FILE = "/data/options.json"
 
-# HA Supervisor API — token is injected automatically into every add-on
+def load_options() -> dict:
+    if os.path.exists(OPTIONS_FILE):
+        with open(OPTIONS_FILE) as f:
+            return json.load(f)
+    return {}
+
+options = load_options()
+
+MQTT_HOST     = options.get("mqtt_host", "core-mosquitto")
+MQTT_PORT     = int(options.get("mqtt_port", 1883))
+MQTT_TOPIC    = options.get("mqtt_topic", "tv/backlight/color")
+MQTT_USER     = options.get("mqtt_user", "")
+MQTT_PASSWORD = options.get("mqtt_password", "")
+INTERVAL      = int(options.get("capture_interval_ms", 200)) / 1000.0
+
+# HA Supervisor API
 SUPERVISOR_TOKEN = os.getenv("SUPERVISOR_TOKEN", "")
 HA_API_BASE      = "http://supervisor/core/api"
 
 DISPLAY_WIDTH  = 640
 DISPLAY_HEIGHT = 480
 
-ROI_FILE    = "/data/roi.json"
-CAM_FILE    = "/data/camera.json"  # persists selected camera source
+ROI_FILE = "/data/roi.json"
+CAM_FILE = "/data/camera.json"
 
 # ---------------------------------------------------------------------------
 # Shared state
@@ -56,8 +66,7 @@ def ha_headers() -> dict:
         "Content-Type": "application/json"
     }
 
-def get_ha_cameras() -> list[dict]:
-    """Return list of {entity_id, name} for all camera.* entities in HA."""
+def get_ha_cameras() -> list:
     try:
         r = requests.get(f"{HA_API_BASE}/states", headers=ha_headers(), timeout=5)
         r.raise_for_status()
@@ -75,8 +84,7 @@ def get_ha_cameras() -> list[dict]:
         print(f"[ha] Failed to fetch camera list: {e}")
         return []
 
-def fetch_ha_frame(entity_id: str) -> np.ndarray | None:
-    """Fetch a single JPEG snapshot from a HA camera entity."""
+def fetch_ha_frame(entity_id: str):
     try:
         url = f"{HA_API_BASE}/camera_proxy/{entity_id}"
         r = requests.get(url, headers=ha_headers(), timeout=5)
@@ -111,8 +119,7 @@ def draw_roi(frame: np.ndarray, roi: dict) -> np.ndarray:
     return out
 
 # ---------------------------------------------------------------------------
-# Thread 1: Capture — writes into shared frame buffer
-# Supports two modes: "usb" and "ha_camera"
+# Thread 1: Capture
 # ---------------------------------------------------------------------------
 def capture_loop():
     global latest_frame
@@ -122,7 +129,6 @@ def capture_loop():
     while True:
         cam_config = load_json(CAM_FILE)
 
-        # No camera configured yet — wait
         if not cam_config:
             time.sleep(1)
             continue
@@ -130,14 +136,12 @@ def capture_loop():
         mode      = cam_config.get("mode", "usb")
         entity_id = cam_config.get("entity_id", "")
 
-        # --- USB mode ---
         if mode == "usb":
             if usb_cap is None or not usb_cap.isOpened():
                 print("[capture] Opening USB camera...")
                 usb_cap = cv2.VideoCapture(0)
                 usb_cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
                 usb_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
-                # Disable auto white balance for better color accuracy
                 usb_cap.set(cv2.CAP_PROP_AUTO_WB, 0)
 
             ret, frame = usb_cap.read()
@@ -150,9 +154,7 @@ def capture_loop():
                 usb_cap = None
                 time.sleep(1)
 
-        # --- HA camera mode ---
         elif mode == "ha_camera":
-            # Release USB cap if switching modes
             if usb_cap is not None:
                 usb_cap.release()
                 usb_cap = None
@@ -162,11 +164,10 @@ def capture_loop():
                 with frame_lock:
                     latest_frame = frame.copy()
 
-            # HA camera polling is interval-driven — no need to spin
             time.sleep(INTERVAL)
 
 # ---------------------------------------------------------------------------
-# Thread 2: Color — reads frame buffer, publishes average RGB via MQTT
+# Thread 2: Color
 # ---------------------------------------------------------------------------
 def color_loop():
     client = mqtt.Client()
@@ -202,12 +203,10 @@ def color_loop():
         payload = json.dumps({"r": r, "g": g, "b": b})
         client.publish(MQTT_TOPIC, payload)
 
-        # USB mode has its own capture rate — color loop drives the interval
         cam_config = load_json(CAM_FILE)
         if cam_config and cam_config.get("mode") == "usb":
             time.sleep(INTERVAL)
         else:
-            # HA camera mode: capture loop already sleeps INTERVAL
             time.sleep(0.05)
 
 # ---------------------------------------------------------------------------
@@ -216,7 +215,6 @@ def color_loop():
 app = Flask(__name__, template_folder="/web/templates")
 
 def generate_stream():
-    """MJPEG stream with ROI overlay for the calibration UI."""
     while True:
         with frame_lock:
             frame = latest_frame.copy() if latest_frame is not None else None
@@ -245,29 +243,21 @@ def stream():
         mimetype="multipart/x-mixed-replace; boundary=frame"
     )
 
-# --- Camera selection endpoints ---
-
 @app.route("/cameras", methods=["GET"])
 def list_cameras():
-    """List all camera.* entities available in HA."""
     cameras = get_ha_cameras()
     return jsonify(cameras)
 
 @app.route("/camera", methods=["GET"])
 def get_camera():
-    config = load_json(CAM_FILE)
-    return jsonify(config)
+    return jsonify(load_json(CAM_FILE))
 
 @app.route("/camera", methods=["POST"])
 def set_camera():
     data = request.json
-    # Expected: {"mode": "ha_camera", "entity_id": "camera.living_room"}
-    #        or {"mode": "usb"}
     save_json(CAM_FILE, data)
     print(f"[web] Camera source set: {data}")
     return jsonify({"status": "ok"})
-
-# --- ROI endpoints ---
 
 @app.route("/roi", methods=["GET"])
 def get_roi():
