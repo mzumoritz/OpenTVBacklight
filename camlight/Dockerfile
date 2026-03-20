@@ -5,17 +5,13 @@ RUN apt-get update && apt-get install -y \
     libglib2.0-0 \
     libv4l-dev \
     v4l-utils \
-    bash \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install opencv-python-headless paho-mqtt flask requests
 
-COPY run.sh /run.sh
 COPY main.py /main.py
 COPY web/ /web/
 
-RUN sed -i 's/\r$//' /run.sh && chmod +x /run.sh
 RUN mkdir -p /data
 
-CMD ["/run.sh"]
+CMD ["python3", "/main.py"]
