@@ -1,19 +1,15 @@
-FROM python:3.11-slim
+FROM ghcr.io/home-assistant/aarch64-base-python:3.11
 
-RUN apt-get update && apt-get install -y \
-    libgl1 \
-    libglib2.0-0 \
-    libv4l-dev \
+RUN apk add --no-cache \
+    libgcc \
+    libstdc++ \
     v4l-utils \
-    && rm -rf /var/lib/apt/lists/*
+    ffmpeg
 
-RUN pip install opencv-python-headless paho-mqtt flask requests
+RUN pip3 install opencv-python-headless paho-mqtt flask requests
 
-COPY run.sh /run.sh
 COPY main.py /main.py
 COPY web/ /web/
 
-RUN sed -i 's/\r$//' /run.sh && chmod +x /run.sh
+RUN printf '#!/usr/bin/with-contenv bashio\npython3 /main.py\n' > /run.sh && chmod +x /run.sh
 RUN mkdir -p /data
-
-CMD ["/run.sh"]
