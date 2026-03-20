@@ -1,18 +1,16 @@
-FROM python:3.11-alpine
+FROM python:3.11-slim
 
-RUN apk add --no-cache \
-    libgcc \
-    libstdc++ \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     v4l-utils \
     ffmpeg \
-    dos2unix \
-    musl-dev \
-    gcc
+    libgl1 \
+    libglib2.0-0 \
+ && rm -rf /var/lib/apt/lists/*
 
 RUN pip3 install --no-cache-dir opencv-python-headless paho-mqtt flask requests
 
 COPY run.sh /run.sh
-RUN dos2unix /run.sh && chmod +x /run.sh
+RUN chmod +x /run.sh
 
 COPY main.py /main.py
 COPY web/ /web/
