@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>CamLight</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px;
+      gap: 20px;
+    }
+    h1 { color: #e94560; font-size: 1.4rem; }
+
+    .card {
+      background: #16213e;
+      border-radius: 10px;
+      padding: 20px;
+      width: 660px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .card h2 { font-size: 1rem; color: #aaa; text-transform: uppercase; letter-spacing: 0.05em; }
+
+    .radio-group { display: flex; gap: 20px; }
+    .radio-group label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+
+    select {
+      width: 100%;
+      padding: 8px 12px;
+      border-radius: 6px;
+      background: #0f3460;
+      color: #eee;
+      border: 1px solid #e94560;
+      font-size: 0.95rem;
+    }
+
+    #container {
+      position: relative;
+      display: inline-block;
+      cursor: crosshair;
+      border: 2px solid #e94560;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    #stream { display: block; }
+    #overlay { position: absolute; top: 0; left: 0; pointer-events: none; }
+
+    .controls { display: flex; gap: 12px; }
+    .btn {
+      padding: 9px 20px;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.8; }
+    .btn-primary  { background: #e94560; color: #fff; }
+    .btn-secondary { background: #444; color: #fff; }
+
+    #status { font-size: 0.85rem; color: #aaa; min-height: 1.2em; }
+
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <h1>📺 CamLight</h1>
+
+  <!-- Step 1: Camera source -->
+  <div class="card">
+    <h2>Step 1 — Camera Source</h2>
+
+    <div class="radio-group">
+      <label>
+        <input type="radio" name="mode" value="ha_camera" checked>
+        Home Assistant Camera
+      </label>
+      <label>
+        <input type="radio" name="mode" value="usb">
+        USB Webcam
+      </label>
+    </div>
+
+    <div id="ha-select">
+      <select id="cameraSelect">
+        <option value="">Loading cameras...</option>
+      </select>
+    </div>
+
+    <div>
+      <button class="btn btn-primary" id="applyCamBtn">Apply Camera</button>
+    </div>
+    <div id="camStatus" class="hidden" style="color:#00cc66; font-size:0.85rem;"></div>
+  </div>
+
+  <!-- Step 2: ROI calibration -->
+  <div class="card">
+    <h2>Step 2 — Screen Region (ROI)</h2>
+    <p style="color:#aaa; font-size:0.85rem;">
+      Draw a rectangle around the TV screen. Only this region will be used for color calculation.
+    </p>
+
+    <div id="container">
+      <img id="stream" src="/stream" width="640" height="480">
+      <canvas id="overlay" width="640" height="480"></canvas>
+    </div>
+
+    <div class="controls">
+      <button class="btn btn-primary" id="saveRoiBtn">💾 Save ROI</button>
+      <button class="btn btn-secondary" id="resetRoiBtn">🔄 Reset</button>
+    </div>
+    <div id="status">Click and drag to mark the screen area.</div>
+  </div>
+
+  <script>
+    const W = 640, H = 480;
+
+    // -----------------------------------------------------------------------
+    // Step 1 — Camera source
+    // -----------------------------------------------------------------------
+    const modeRadios   = document.querySelectorAll('input[name="mode"]');
+    const haSelect     = document.getElementById("ha-select");
+    const cameraSelect = document.getElementById("cameraSelect");
+    const applyCamBtn  = document.getElementById("applyCamBtn");
+    const camStatus    = document.getElementById("camStatus");
+
+    function getMode() {
+      return document.querySelector('input[name="mode"]:checked').value;
+    }
+
+    function toggleHaSelect() {
+      haSelect.style.display = getMode() === "ha_camera" ? "block" : "none";
+    }
+
+    modeRadios.forEach(r => r.addEventListener("change", toggleHaSelect));
+    toggleHaSelect();
+
+    // Fetch available HA cameras
+    fetch("/cameras").then(r => r.json()).then(cameras => {
+      cameraSelect.innerHTML = "";
+      if (cameras.length === 0) {
+        cameraSelect.innerHTML = '<option value="">No cameras found in HA</option>';
+        return;
+      }
+      cameras.forEach(cam => {
+        const opt = document.createElement("option");
+        opt.value = cam.entity_id;
+        opt.textContent = `${cam.name} (${cam.entity_id})`;
+        cameraSelect.appendChild(opt);
+      });
+    });
+
+    // Restore saved camera selection
+    fetch("/camera").then(r => r.json()).then(config => {
+      if (!config) return;
+      document.querySelector(`input[name="mode"][value="${config.mode}"]`).checked = true;
+      toggleHaSelect();
+      if (config.entity_id) cameraSelect.value = config.entity_id;
+    });
+
+    applyCamBtn.addEventListener("click", () => {
+      const mode = getMode();
+      const payload = { mode };
+      if (mode === "ha_camera") {
+        if (!cameraSelect.value) {
+          camStatus.textContent = "Please select a camera.";
+          camStatus.classList.remove("hidden");
+          return;
+        }
+        payload.entity_id = cameraSelect.value;
+      }
+      fetch("/camera", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }).then(() => {
+        camStatus.textContent = mode === "usb"
+          ? "✅ USB webcam selected. Stream should appear shortly."
+          : `✅ Camera set to ${cameraSelect.value}.`;
+        camStatus.classList.remove("hidden");
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // Step 2 — ROI calibration
+    // -----------------------------------------------------------------------
+    const canvas  = document.getElementById("overlay");
+    const ctx     = canvas.getContext("2d");
+    const status  = document.getElementById("status");
+
+    let startX, startY, endX, endY, drawing = false;
+
+    canvas.style.pointerEvents = "auto";
+
+    // Load existing ROI
+    fetch("/roi").then(r => r.json()).then(roi => {
+      if (!roi) return;
+      startX = roi.x1 * W; startY = roi.y1 * H;
+      endX   = roi.x2 * W; endY   = roi.y2 * H;
+      drawRect(startX, startY, endX, endY, "#00cc66");
+      status.textContent = "Saved ROI loaded. Draw a new one to change it.";
+    });
+
+    canvas.addEventListener("mousedown", e => {
+      const r = canvas.getBoundingClientRect();
+      startX = e.clientX - r.left;
+      startY = e.clientY - r.top;
+      drawing = true;
+    });
+
+    canvas.addEventListener("mousemove", e => {
+      if (!drawing) return;
+      const r = canvas.getBoundingClientRect();
+      endX = e.clientX - r.left;
+      endY = e.clientY - r.top;
+      ctx.clearRect(0, 0, W, H);
+      drawRect(startX, startY, endX, endY, "#e94560");
+    });
+
+    canvas.addEventListener("mouseup", e => {
+      if (!drawing) return;
+      drawing = false;
+      const r = canvas.getBoundingClientRect();
+      endX = e.clientX - r.left;
+      endY = e.clientY - r.top;
+      ctx.clearRect(0, 0, W, H);
+      drawRect(startX, startY, endX, endY, "#e94560");
+      status.textContent = "ROI drawn. Click Save to apply.";
+    });
+
+    function drawRect(x1, y1, x2, y2, color) {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 3]);
+      ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+    }
+
+    document.getElementById("saveRoiBtn").addEventListener("click", () => {
+      if (startX == null || endX == null) {
+        status.textContent = "No region drawn yet.";
+        return;
+      }
+      const roi = {
+        x1: Math.min(startX, endX) / W,
+        y1: Math.min(startY, endY) / H,
+        x2: Math.max(startX, endX) / W,
+        y2: Math.max(startY, endY) / H
+      };
+      fetch("/roi", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(roi)
+      }).then(() => {
+        ctx.clearRect(0, 0, W, H);
+        drawRect(startX, startY, endX, endY, "#00cc66");
+        status.textContent = "✅ ROI saved — color loop updated immediately.";
+      });
+    });
+
+    document.getElementById("resetRoiBtn").addEventListener("click", () => {
+      fetch("/roi/reset", { method: "POST" }).then(() => {
+        ctx.clearRect(0, 0, W, H);
+        startX = startY = endX = endY = null;
+        status.textContent = "ROI cleared. Full frame is being used.";
+      });
+    });
+  </script>
+</body>
+</html>

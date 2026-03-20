@@ -1,0 +1,29 @@
+{
+  "name": "CamLight",
+  "version": "1.0.0",
+  "slug": "camlight",
+  "description": "Camera-based TV backlight via average color",
+  "arch": ["armv7", "aarch64"],
+  "startup": "application",
+  "boot": "auto",
+  "ingress": true,
+  "ingress_port": 8099,
+  "panel_icon": "mdi:television-ambient-light",
+  "panel_title": "CamLight",
+  "options": {
+    "mqtt_host": "core-mosquitto",
+    "mqtt_port": 1883,
+    "mqtt_topic": "tv/backlight/color",
+    "capture_interval_ms": 200,
+    "mqtt_user": "",
+    "mqtt_password": ""
+  },
+  "schema": {
+    "mqtt_host": "str",
+    "mqtt_port": "int",
+    "mqtt_topic": "str",
+    "capture_interval_ms": "int",
+    "mqtt_user": "str",
+    "mqtt_password": "str"
+  }
+}
